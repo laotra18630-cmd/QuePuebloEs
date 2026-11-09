@@ -1,7 +1,7 @@
 /* Service worker de ¿Qué pueblo es?
    Guarda la app y los datos para que funcione sin conexión después de la primera visita.
    Si cambias archivos, sube el número de VERSION para invalidar la caché. */
-const VERSION = 'v6';
+const VERSION = 'v7';
 const CACHE = 'que-pueblo-' + VERSION;
 
 const CORE = [

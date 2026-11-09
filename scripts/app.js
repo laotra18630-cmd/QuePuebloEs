@@ -1713,9 +1713,33 @@ function pedirPos(opts,ms){
     var fin=function(v){if(hecho)return;hecho=true;res(v)};
     var t=setTimeout(function(){fin({error:{code:3,message:"tiempo agotado"}})},ms||15000);
     try{
-      navigator.geolocation.getCurrentPosition(function(p){clearTimeout(t);fin(p)},function(e){clearTimeout(t);fin({error:e})},opts||{});
+      if(!navigator.geolocation||!navigator.geolocation.getCurrentPosition){clearTimeout(t);fin({error:{code:2,message:"sin geolocalización"}});return}
+      navigator.geolocation.getCurrentPosition(function(p){clearTimeout(t);fin(p)},function(e){clearTimeout(t);fin({error:e||{code:2,message:"error"}})},opts||{});
     }catch(e){clearTimeout(t);fin({error:{code:2,message:e&&e.message||"error"}})}
   });
+}
+// Alternativa: algunas WebView/navegadores en Android dan la primera posición por watchPosition
+function pedirPosWatch(opts,ms){
+  return new Promise(function(res){
+    var hecho=false,id=null;
+    var fin=function(v){if(hecho)return;hecho=true;try{if(id!==null)navigator.geolocation.clearWatch(id)}catch(e){}res(v)};
+    var t=setTimeout(function(){fin({error:{code:3,message:"tiempo agotado"}})},ms||15000);
+    try{
+      if(!navigator.geolocation||!navigator.geolocation.watchPosition){clearTimeout(t);fin({error:{code:2,message:"sin geolocalización"}});return}
+      id=navigator.geolocation.watchPosition(function(p){clearTimeout(t);fin(p)},function(e){clearTimeout(t);fin({error:e||{code:2,message:"error"}})},opts||{});
+    }catch(e){clearTimeout(t);fin({error:{code:2,message:e&&e.message||"error"}})}
+  });
+}
+function msgSinPermisoUbic(){
+  return window.AndroidApp
+    ?"Sin permiso de ubicación. Ve a Ajustes de Android > Aplicaciones > ¿Qué pueblo es? > Permisos > Ubicación y permítelo (mejor «Solo al usar la app»), con la ubicación del móvil activada."
+    :"Sin permiso de ubicación. Actívalo en los ajustes del navegador o del móvil (icono del candado del sitio) y vuelve a intentarlo.";
+}
+function msgSinUbic(e){
+  var c=e&&e.code;
+  if(c===1)return msgSinPermisoUbic();
+  if(c===2)return "La ubicación no está disponible ahora. Activa la ubicación/GPS del móvil, sal al exterior si estás bajo techo y vuelve a intentarlo.";
+  return "No pude obtener la ubicación (tardó demasiado). Activa el GPS/ubicación del móvil, sal al exterior y vuelve a intentarlo.";
 }
 async function iniciar2(){
   $("msg").textContent="Comprobando permisos…";
@@ -1727,18 +1751,21 @@ async function iniciar2(){
   }catch(e){$("msg").textContent="Error de brújula: "+(e&&e.message?e.message:e)+". Abre esta página directamente en Safari.";return}
   if(!navigator.geolocation){$("msg").textContent="Este navegador no tiene GPS.";return}
   $("msg").textContent="Obteniendo tu ubicación… (acepta el permiso si te lo pide)";
-  // Intento rápido (red/caché), útil en Android; luego alta precisión si hace falta
-  var p0=await pedirPos({enableHighAccuracy:false,timeout:12000,maximumAge:120000},13000);
-  if(p0&&p0.error&&p0.error.code===1){$("msg").textContent="Sin permiso de ubicación. Actívalo en los ajustes del navegador o de la app y vuelve a intentarlo.";return}
-  if(p0&&p0.error){
-    $("msg").textContent="Afinando la ubicación…";
-    p0=await pedirPos({enableHighAccuracy:true,timeout:18000,maximumAge:60000},19000);
+  // Varios intentos: rápido (red/caché) → alta precisión → watchPosition → permisivo
+  var intentos=[
+    {opts:{enableHighAccuracy:false,timeout:10000,maximumAge:300000},ms:11000,txt:"Obteniendo tu ubicación…"},
+    {opts:{enableHighAccuracy:true,timeout:15000,maximumAge:60000},ms:16000,txt:"Afinando la ubicación (GPS)…"},
+    {watch:1,opts:{enableHighAccuracy:false,timeout:15000,maximumAge:300000},ms:16000,txt:"Buscando ubicación…"},
+    {opts:{enableHighAccuracy:true,timeout:20000,maximumAge:0},ms:21000,txt:"Intentando de nuevo con GPS…"}
+  ];
+  var p0=null,denegado=false;
+  for(var i=0;i<intentos.length;i++){
+    $("msg").textContent=intentos[i].txt+" (acepta el permiso si te lo pide)";
+    p0=intentos[i].watch?await pedirPosWatch(intentos[i].opts,intentos[i].ms):await pedirPos(intentos[i].opts,intentos[i].ms);
+    if(p0&&!p0.error)break;
+    if(p0&&p0.error&&p0.error.code===1){denegado=true;break}
   }
-  if(p0&&p0.error&&p0.error.code===1){$("msg").textContent="Sin permiso de ubicación. Actívalo en los ajustes del navegador o de la app y vuelve a intentarlo.";return}
-  if(p0&&p0.error){
-    p0=await pedirPos({enableHighAccuracy:false,timeout:15000,maximumAge:300000},16000);
-  }
-  if(!p0||p0.error){var e=(p0&&p0.error)||{};$("msg").textContent=e.code===1?"Sin permiso de ubicación. Actívalo en los ajustes del navegador o de la app y vuelve a intentarlo.":"No pude obtener la ubicación ("+(e.message||"sin señal")+"). Sal al exterior o activa el GPS y vuelve a intentarlo.";return}
+  if(!p0||p0.error){$("msg").textContent=msgSinUbic(p0&&p0.error);return}
   (function(p){
     pos=p.coords;ultimaPos=pos;posT=Date.now();$("go").style.display="none";$("msg").textContent="Ubicación obtenida.";
     masPueblos();document.body.classList.add("on");camara();pantallaEncendida(true);consejosPrimeraVez();
