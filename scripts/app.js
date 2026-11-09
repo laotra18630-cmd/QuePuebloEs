@@ -1758,13 +1758,28 @@ async function iniciar2(){
     {watch:1,opts:{enableHighAccuracy:false,timeout:15000,maximumAge:300000},ms:16000,txt:"Buscando ubicación…"},
     {opts:{enableHighAccuracy:true,timeout:20000,maximumAge:0},ms:21000,txt:"Intentando de nuevo con GPS…"}
   ];
+  function posDesdeAndroid(){
+    try{
+      if(!window.AndroidApp||!AndroidApp.ubicacion)return null;
+      var s=AndroidApp.ubicacion(); if(!s)return null;
+      var k=s.split(","); var la=+k[0],lo=+k[1],ac=+k[2],al=+k[3];
+      if(!isFinite(la)||!isFinite(lo)||Math.abs(la)>90||Math.abs(lo)>180)return null;
+      if(la===0&&lo===0)return null;
+      return {coords:{latitude:la,longitude:lo,accuracy:isFinite(ac)?ac:200,altitude:isFinite(al)?al:null,altitudeAccuracy:null,heading:null,speed:null}};
+    }catch(e){return null}
+  }
   var p0=null,denegado=false;
-  for(var i=0;i<intentos.length;i++){
+  // En la app Android, prueba primero la última ubicación conocida del sistema
+  if(window.AndroidApp){ p0=posDesdeAndroid(); }
+  for(var i=0;(!p0||p0.error)&&i<intentos.length;i++){
     $("msg").textContent=intentos[i].txt+" (acepta el permiso si te lo pide)";
     p0=intentos[i].watch?await pedirPosWatch(intentos[i].opts,intentos[i].ms):await pedirPos(intentos[i].opts,intentos[i].ms);
     if(p0&&!p0.error)break;
     if(p0&&p0.error&&p0.error.code===1){denegado=true;break}
+    // reintento con ubicación del sistema en Android
+    if(window.AndroidApp){ var pa=posDesdeAndroid(); if(pa){p0=pa;break} }
   }
+  if(window.AndroidApp&&(!p0||p0.error)){ var pa2=posDesdeAndroid(); if(pa2)p0=pa2; }
   if(!p0||p0.error){$("msg").textContent=msgSinUbic(p0&&p0.error);return}
   (function(p){
     pos=p.coords;ultimaPos=pos;posT=Date.now();$("go").style.display="none";$("msg").textContent="Ubicación obtenida.";
